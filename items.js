@@ -40,7 +40,7 @@ items = {
 				if (block.hardness <= item.mineLevel) {
 					if (item.durability > 0) {
 						block.onMine(pos)
-						log(makeLocal(lang.msg_mined, block.name, block.mineTime))
+						log(makeLocal(lang.msg_mined, ((typeof block.name == "function") ? block.name(pos) : block.name), block.mineTime))
 						item.durability--
 						if (item.durability <= 0) {
 							log(makeLocal(lang.msg_itemBroken, item.name))
@@ -50,11 +50,17 @@ items = {
 						log(makeLocal(lang.msg_pickBroken, item.name))
 					}
 				} else {
-					log(makeLocal(lang.msg_blockTooHard(block.name, item.name)))
+					log(makeLocal(lang.msg_blockTooHard(((typeof block.name == "function") ? block.name(pos) : block.name), item.name)))
 				}
 			} else {
-				log(makeLocal(lang.msg_blockNotMinable, block.name))
+				log(makeLocal(lang.msg_blockNotMinable, ((typeof block.name == "function") ? block.name(pos) : block.name)))
 			}
 		}
+	},
+	accessCard: {
+		getName: () => lang.item_accessCard,
+		getDesc: () => lang.item_accessCard_desc,
+		use: () => { },
+		create: () => { return { type: "accessCard" } }
 	}
 }

@@ -20,7 +20,7 @@
 		var logLength = 10
 		var sidebarWidth = 400;
 		var sidebarWidthDefault = 400;
-		var ctx;
+		var ctx, debugCtx;
 		var pixelsPerTiles = 50
 		var transformOffset = [0, 0]
 		var debug = false
@@ -42,7 +42,7 @@
 
 		var game = {
 			player: {
-				pos: [0, 0],
+				pos: [0,0],
 				health: 10,
 				maxHealth: 10,
 				money: 0,
@@ -53,7 +53,8 @@
 			},
 			time: 0,
 			log: [],
-			npcs: {}
+			npcs: {},
+			npcProxies: {}
 		}
 		Object.defineProperty(window, "player", {
 			get: () => game.player
@@ -69,9 +70,9 @@
 		}
 
 		var util = {
-			drawTileBox: (pos, color) => {
+			drawTileBox: (pos, color, size = [1,1]) => {
 				var pos = transform(pos).add([-1, -1])
-				var size = transformSize([1, 1]).add([1, 1])
+				var size = transformSize(size).add([1, 1])
 
 				ctx.setColor(color).box(pos, size)
 			},
@@ -131,6 +132,12 @@
 					}
 				})
 				return lines.join("\n")
+			},
+			makeNPCProxy: (pos, block, npcPos) => {
+				setBlock(pos, 7)
+				game.npcProxies[pos.join(":")] = {
+					pos,block,npcPos
+				}
 			}
 		}
 
@@ -138,6 +145,7 @@
 
 		function setup() {
 			ctx = B.canvas.toCtx();
+			debugCtx = E.debug.toCtx()
 			if ("save" in B.lStorage.data && !("fresh" in B.get)) {
 				var loaded = B.lStorage.data.save.split("\n")
 				game = Object.assign(game, JSON.parse(loaded.shift()))
@@ -149,29 +157,42 @@
 					})
 				})
 			} else {
-				setRect([-4, -4], [9, 9], 3, 0)
+				setRect([-4, -4], [9, 9], 3, 0) // Elevator room
 				setRect([-1, -1], [3, 3], 3, 0)
 				setBlock([0, -1], 0)
+				setBlock([2, -1], 3)
+				setBlock([2, 0], 8)
 				setRect([2, 1], [2, 1], 3)
 				createNPC([1, 3], colors.darkGreen, "tutorial", "greeter")
-				setRect([-4, 4], [18, 3], 3, 0)
-				setBlock([0, 4], 0)//4)
-				setRect([4, -4], [9, 9], 3, 0)
+				setRect([-4, 4], [18, 3], 3, 0) // 1. Horizontal Corridor
+				setBlock([0, 4], 4)
+				setRect([4, -4], [9, 9], 3, 0) // Training room
 				setBlock([8, 4], 0)
 				setRect([7, -1], [3, 3], 1)
 				createNPC([9, 3], colors.darkGreen, "tutorial", "trainer")
-				setRect([-4, 6], [19, 9], 3, 0)
+				setRect([-4, 6], [19, 9], 3, 0) // 1. Vertical Corridor
 				setRect([4, 6], [3, 4], 3, 0)
 				setRect([2, 9], [7, 6], 3, 0)
 				setBlock([5, 6], 0)
 				setBlock([5, 9], 0)
-				setBlock([4,7],4)
-				setBlock([6, 7], 4)
-				setBlock([4,13],1)
-				setBlock([5,13],1)
-				setBlock([5,12],1)
+				setBlock([4, 7], 4)
+				//setBlock([6, 7], 4)
+				setBlock([4, 13], 1) //Stone blockade --idk spelling
+				//setBlock([5,13],1) //Development shortcut
+				//setBlock([5,12],1) //Development shortcut
 				setBlock([6, 13], 1)
-				createNPC([7,11], colors.orange, "tutorial", "ambBlocked")
+				createNPC([7, 11], colors.orange, "tutorial", "ambBlocked")
+				setRect([-4, 14], [18, 5], 3, 0) // 2. Horizontal Corridor
+				setBlock([5, 14], 0)
+				setBlock([1, 14], 0)
+				setRect([-4, 6], [5, 9], 3, 0) // Bunks
+				setBlock([9, 14], 0)
+				setBlock([0, 10], 4)
+				setBlock([1, 9], 3)
+				setRect([10, 6], [5, 9], 3, 0) // Manager's office
+				setBlock([10, 10], 0)
+				util.makeNPCProxy([12, 8], 6, [12, 7])
+				createNPC([12, 7], colors.darkGrey, "tutorial", "manager")
 			}
 		}
 
@@ -212,64 +233,71 @@
 
 			blocksRendered = []
 			blocksSolid = []
-			var chunks = chunksInRect(getScreenRect()).transform((v) => { lastChunksRendered = v.length; return v })
+			var screenRect = getScreenRect()
+			var chunks = chunksInRect(screenRect).transform((v) => { lastChunksRendered = v.length; return v })
+			var screenSizeHalf = screenRect.size.mul(0.5).map(v => v.ceil())
 			chunks.forEach((v) => testChunk(v))
-
-			var visionArea = [];
 			var radius = size.mul(0.5).size();
 
 			ctx.setColor(colors.pink);
+			debugCtx.setColor(colors.pink);
 
 			if (visionRaycastActive) {
-				(Math.PI * 2).segment(visionRaycastSegNum).forEach((v) => {
-					var dir = vector.fromAngle(v + visionRaycastAngleOffset)
-					ctx.ellipse(transform(player.pos.add([0.5, 0.5]).add(dir)), [2, 2])
-					for (var dist = 0; dist < radius * 2; dist += 0.5) {
-						var pos = player.pos.add([0.5, 0.5]).add(dir.mul(dist)).floor()
-						if (blocksSolid.indexOf(pos[0] + ":" + pos[1]) != -1) {
-							//ctx.strokeEllipse(transform(pos), [5, 5])
-							break;
+				let blocksExplored = [player.pos.join(":")]
+				let blocksFresh = [player.pos.join(":")]
+				let checkRelative = (pos, offset) => {
+					if (blocksSolid.indexOf(pos.add(offset).join(":")) == -1 && blocksExplored.indexOf(pos.add(offset).join(":")) == -1) {
+						if (raycastFrom(pos.add(offset))) {
+							blocksExplored.push(pos.add(offset).join(":"))
+							blocksFresh.push(pos.add(offset).join(":"))
+							return 1
+						} else {
+							return 0
 						}
-						//else ctx.ellipse(transform(pos), [5, 5])
 					}
-					var nDir = dir.map(v => {
-						if (v > 0.09) return 1
-						else if (v < -0.09) return -1
-						else return 0
+					return 0
+				}
+				let raycastFrom = (pos) => {
+					if (pos.equals(player.pos)) {
+						return true
+					} else {
+						let npos = pos.add([0.5, 0.5]).add(player.pos.add([0.5, 0.5]).add(pos.add([0.5, 0.5]).mul(-1)).normalize()).floor()
+
+
+						if (npos.equals(player.pos) || blocksExplored.indexOf(npos.join(":")) != -1) {
+							return true
+						}
+						return false//return raycastFrom(pos.add(player.pos.add(pos.mul(-1))).mul(0.5).floor())
+
+					}
+				}
+
+				for (var i = 0; i < 1000; i++) {
+					if (i == 999) {
+						throw new Error("Vision loop overflow")
+						break;
+					}
+
+					let found = 0
+					let blocksFreshLast = blocksFresh.slice()
+					blocksFresh = []
+					blocksFreshLast.forEach(v => {
+						var pos = v.split(":").map(v => parseInt(v))
+						if (pos.map((v, i) => Math.abs(player.pos[i] - v) > screenSizeHalf[i]).map(v => +v).max() >= 1) return
+
+						found += checkRelative(pos, [1, 0])
+						found += checkRelative(pos, [-1, 0])
+						found += checkRelative(pos, [0, 1])
+						found += checkRelative(pos, [0, -1])
 					})
-					const inflate = 0.4
-					if (nDir.equals([1, 0]) && visionRaycastSpread) {
-						visionArea.push((player.pos.add([0.5, 0.5]).add(dir.mul(dist + inflate)).add([0, 0.6])))
-						visionArea.push((player.pos.add([0.5, 0.5]).add(dir.mul(dist + inflate)).add([0, -0.6])))
-					} else if (nDir.equals([0, 1]) && visionRaycastSpread) {
-						visionArea.push((player.pos.add([0.5, 0.5]).add(dir.mul(dist + inflate)).add([-0.6, 0])))
-						visionArea.push((player.pos.add([0.5, 0.5]).add(dir.mul(dist + inflate)).add([0.6, 0])))
-					} else if (nDir.equals([-1, 0]) && visionRaycastSpread) {
-						visionArea.push((player.pos.add([0.5, 0.5]).add(dir.mul(dist + inflate)).add([0, -0.6])))
-						visionArea.push((player.pos.add([0.5, 0.5]).add(dir.mul(dist + inflate)).add([0, 0.6])))
-					} else if (nDir.equals([0, -1]) && visionRaycastSpread) {
-						visionArea.push((player.pos.add([0.5, 0.5]).add(dir.mul(dist + inflate)).add([0.6, 0])))
-						visionArea.push((player.pos.add([0.5, 0.5]).add(dir.mul(dist + inflate)).add([-0.6, 0])))
-					} else visionArea.push((player.pos.add([0.5, 0.5]).add(dir.mul(dist + inflate))))
-				})
+
+					if (found <= 0) break;
+				}
+
+				blocksRendered = blocksExplored
 			} else {
-				visionArea = [[-10, -10], [10, -10], [10, 10], [-10, 10]]
+
 			}
-
-			blocksRendered = blocksRendered.filter((v) => {
-				return util.pointInsidePolygon(v.add([0.5, -0.5]), visionArea) ||
-
-					util.pointInsidePolygon(v.add([-0.5, 0.5]), visionArea) ||
-					util.pointInsidePolygon(v.add([0.5, 0.5]), visionArea) ||
-					util.pointInsidePolygon(v.add([-0.5, -0.5]), visionArea) ||
-					util.pointInsidePolygon(v.add([0, -0.5]), visionArea) ||
-					util.pointInsidePolygon(v.add([0, 0.5]), visionArea) ||
-					util.pointInsidePolygon(v.add([0.5, 0]), visionArea) ||
-					util.pointInsidePolygon(v.add([-0.5, 0]), visionArea)
-			}).map(v => {
-				v = v.add([-0.5, -0.5])
-				return v[0] + ":" + v[1]
-			})
 
 			chunks.forEach((v) => renderChunk(v))
 
@@ -299,19 +327,19 @@
 				let materials = player.materials.toArray()
 
 				let npcText = lang.misc_nothinINearby;
-				let maxChar = (sidebarWidth - 10) / ctx.measureText(sidebarTextSize, "q", sidebarFont)
+				let maxChar = (sidebarWidth - 10) / ctx.measureText(sidebarTextSize, "q", sidebarFont) - 2
 
 				for (let dir of [[1, 0], [-1, 0], [0, 1], [0, -1], false]) {
 					if (dir == false) {
 						lastNpc = null
 						continue
 					}
-					if (getBlock(player.pos.add(dir)) == 5) {
+					if (getBlock(player.pos.add(dir)) == 5 || getBlock(player.pos.add(dir)) == 7) {
 
-						var npc = game.npcs[player.pos.add(dir).join(":")]
+						var npc = (getBlock(player.pos.add(dir)) == 5) ? game.npcs[player.pos.add(dir).join(":")] : game.npcs[game.npcProxies[player.pos.add(dir).join(":")].npcPos.join(":")]
 						if (npc) {
-							ctx.line(transform(player.pos.add(dir).add([0.9, 0.3])), [size[0] - sidebarWidth, npcDotY], 2)
-								.ellipse(transform(player.pos.add(dir).add([0.9, 0.3])), [3, 3])
+							ctx.line(transform(npc.pos.add([0.9, 0.3])), [size[0] - sidebarWidth, npcDotY], 2)
+								.ellipse(transform(npc.pos.add([0.9, 0.3])), [3, 3])
 
 							var langSource = "event_" + npc.event + "_npc_" + npc.name + "_"
 							if (npc.event in events && npc.name in events[npc.event].npcs) var npcP = events[npc.event].npcs[npc.name]
@@ -341,7 +369,7 @@
 									}
 									if (typeof value == "string") {
 										npc.convStatus = answers[i].value
-										if (typeof npcP.convs[npc.convStatus].begin == "function") npcP.convs[npc.convStatus].begin(npc, npcP)
+										if (npc.convStatus in npcP.convs && typeof npcP.convs[npc.convStatus].begin == "function") npcP.convs[npc.convStatus].begin(npc, npcP)
 									} else if (typeof value == "function") {
 										let ret = value(npc, npcP)
 										if (typeof ret == "string") {
@@ -462,7 +490,14 @@
 		function renderChunk(chunk) {
 			repeat(tilesPerChunk, (x) => {
 				repeat(tilesPerChunk, (y) => {
-					if (blocksRendered.indexOf(chunk.pos.mul(tilesPerChunk).add([x, y]).transform(v => v[0] + ":" + v[1])) != -1) {
+					var pos = chunk.pos.mul(tilesPerChunk).add([x, y])
+					if (
+						blocksRendered.indexOf(pos.add([0, 0]).join(":")) != -1 ||
+						blocksRendered.indexOf(pos.add([1, 0]).join(":")) != -1 ||
+						blocksRendered.indexOf(pos.add([-1, 0]).join(":")) != -1 ||
+						blocksRendered.indexOf(pos.add([0, 1]).join(":")) != -1 ||
+						blocksRendered.indexOf(pos.add([0, -1]).join(":")) != -1
+					) {
 
 						var curr = chunk.tiles[x + y * tilesPerChunk]
 						if (curr < 0 || curr >= blocks.length) {
@@ -559,5 +594,6 @@
 </head>
 <body>
 	<canvas class="fullpage" style="cursor:none;height:100%;left:0px"></canvas>
+	<canvas class="fullpage" style="cursor:none;height:100%;left:0px" id="debug"></canvas>
 </body>
 </html>
