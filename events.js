@@ -104,6 +104,28 @@ events = {
 						}
 					}
 				}
+			},
+			manager: {
+				convs: {
+					init: {
+						replace: [
+							()=>player.name
+						],
+						answers: {
+							confident: "middle",
+							smug: "middle",
+							suprised: "middle"
+						}
+					},
+					middle: {
+						begin: () => {
+							game.player.items.push(items.accessCard.create())
+						},
+						answers: {
+							now: "final"
+						}
+					}
+				}
 			}
 		}
 	}
